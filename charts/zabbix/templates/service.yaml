@@ -196,6 +196,53 @@ spec:
 {{- end }}
 
 
+{{- if .Values.zabbixMcpServer.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ template "zabbix.fullname" . }}-zabbix-mcp-server
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "zabbix.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mcp-server
+  {{- if .Values.zabbixMcpServer.service.annotations }}
+  annotations:
+    {{- range $key,$value := .Values.zabbixMcpServer.service.annotations }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+  {{- end }}
+spec:
+  type: {{ .Values.zabbixMcpServer.service.type }}
+  {{- if and .Values.zabbixMcpServer.service.externalTrafficPolicy (or (eq .Values.zabbixMcpServer.service.type "NodePort") (eq .Values.zabbixMcpServer.service.type "LoadBalancer" )) }}
+  externalTrafficPolicy: {{ .Values.zabbixMcpServer.service.externalTrafficPolicy }}
+  {{- end }}
+  {{- if and .Values.zabbixMcpServer.service.loadBalancerIP (eq .Values.zabbixMcpServer.service.type "LoadBalancer") }}
+  loadBalancerIP: {{ .Values.zabbixMcpServer.service.loadBalancerIP }}
+  {{- end }}
+  {{- if and .Values.zabbixMcpServer.service.clusterIP (eq .Values.zabbixMcpServer.service.type "ClusterIP") }}
+  clusterIP: {{ .Values.zabbixMcpServer.service.clusterIP }}
+  {{- end }}
+  {{- if and (eq .Values.zabbixMcpServer.service.type "LoadBalancer") (not (empty .Values.zabbixMcpServer.service.loadBalancerSourceRanges)) }}
+  loadBalancerSourceRanges: {{- toYaml .Values.zabbixMcpServer.service.loadBalancerSourceRanges | nindent 4 }}
+  {{- end }}
+  {{- if and (eq .Values.zabbixMcpServer.service.type "LoadBalancer") .Values.zabbixMcpServer.service.loadBalancerClass }}
+  loadBalancerClass: {{ .Values.zabbixMcpServer.service.loadBalancerClass }}
+  {{- end }}
+  ports:
+    - port: {{ .Values.zabbixMcpServer.service.port }}
+      name: mcp-server
+      targetPort: mcp-server
+      protocol: TCP
+      {{- if and (or (eq .Values.zabbixMcpServer.service.type "NodePort") (eq .Values.zabbixMcpServer.service.type "LoadBalancer" )) (not (empty .Values.zabbixMcpServer.service.nodePort)) }}
+      nodePort: {{ .Values.zabbixMcpServer.service.nodePort }}
+      {{- end }}
+  selector:
+    {{- include "zabbix.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: mcp-server
+{{- end }}
+
+
 {{- if .Values.zabbixProxy.enabled }}
 ---
 apiVersion: v1

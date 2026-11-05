@@ -787,6 +787,146 @@ zabbixWebService:
   # -- nodeSelector configurations. Reference: https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/
   nodeSelector: {}
 
+# **Zabbix MCP Server** configurations. Available since Zabbix 8.0.
+# See: https://www.zabbix.com/documentation/8.0/en/manual/concepts/mcp_server
+zabbixMcpServer:
+  # -- Enables use of **Zabbix MCP Server**. Requires Zabbix >= 8.0: set ``zabbixImageTag`` or ``zabbixMcpServer.image.tag`` accordingly
+  enabled: false
+  # -- Number of replicas of ``zabbixMcpServer`` module. The MCP server is stateless, so it can be scaled horizontally
+  replicaCount: 1
+  # -- Set permissive podAntiAffinity to spread replicas over cluster nodes if replicaCount>1
+  podAntiAffinity: true
+  # -- Requests and limits of pod resources. See: [https://kubernetes.io/docs/concepts/configuration/manage-resources-containers](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers)
+  resources: {}
+  image:
+    # -- Zabbix MCP Server Docker image name
+    repository: zabbix/zabbix-mcp-server
+    # -- Zabbix MCP Server Docker image tag, if you want to override zabbixImageTag. Must be >= 8.0, e.g. ``ubuntu-8.0-latest``
+    tag: null
+    # -- Pull policy of Docker image
+    pullPolicy: IfNotPresent
+    # -- List of dockerconfig secrets names to use when pulling images
+    pullSecrets: []
+  # -- Zabbix API endpoint (ZBX_FRONTEND_URL), must end with ``api_jsonrpc.php``.
+  # If empty, the in-cluster Zabbix Web service of this release is used, e.g. ``http://<release>-zabbix-web:80/api_jsonrpc.php``
+  frontendURL: ""
+  # -- Comma-separated list of IP addresses/CIDRs of MCP clients allowed to connect (ZBX_ALLOWEDIP).
+  # Clients reaching the server through an Ingress/LoadBalancer are seen with the proxy/node IP. Restrict this in production.
+  allowedIP: "0.0.0.0/0,::/0"
+  # -- Port the Zabbix MCP Server listens on inside the container (ZBX_LISTENPORT, range 1024-32767)
+  port: 8443
+  # -- Debug level (ZBX_DEBUGLEVEL, 0-5). Image default is 3 if not set
+  debugLevel: null
+  # -- Timeout in seconds for Zabbix API requests (ZBX_TIMEOUT, 3-30). Image default is 10 if not set
+  timeout: null
+  # -- Maximum size of a tool response (ZBX_MAX_RESPONSE_SIZE, 16K-256K). Image default is 64K if not set
+  maxResponseSize: null
+  # -- Prefix prepended to exposed tool names (ZBX_TOOL_PREFIX)
+  toolPrefix: null
+  # -- Skip TLS certificate validation for Zabbix API requests (ZBX_IGNOREURLCERTERRORS). Development only!
+  ignoreURLCertErrors: false
+  # Tool access rules. If any rule is set, it replaces the image's default policy, which denies
+  # ``item_get``, ``lld_get``, ``interface_get``, ``macro_get`` and ``history_get``.
+  # Rules do not extend permissions of the Zabbix API token used by the MCP client.
+  toolAccess:
+    # -- List of tool names to allow (ZBX_ALLOWTOOL_<N>), e.g. ``["history_get"]``
+    allowTool: []
+    # -- List of tool names to deny (ZBX_DENYTOOL_<N>), e.g. ``["maintenance_delete"]``
+    denyTool: []
+    # -- List of regular expressions of tool names to allow (ZBX_ALLOWTOOL_REGEXP_<N>)
+    allowToolRegexp: []
+    # -- List of regular expressions of tool names to deny (ZBX_DENYTOOL_REGEXP_<N>), e.g. ``["^maintenance_"]``
+    denyToolRegexp: []
+  tls:
+    # -- Serve HTTPS directly from the MCP server (ZBX_TLSACCEPT=cert). Leave disabled when TLS is terminated by an Ingress/reverse proxy
+    enabled: false
+    # -- Name of an existing Secret with the certificate and key, mounted read-only at ``/var/lib/zabbix/enc``. A ``kubernetes.io/tls`` Secret works as is
+    secretName: ""
+    # -- File name of the certificate inside the Secret (ZBX_TLSCERTFILE)
+    certFile: tls.crt
+    # -- File name of the private key inside the Secret (ZBX_TLSKEYFILE)
+    keyFile: tls.key
+  service:
+    # -- Type of service to expose the application. Valid options are ExternalName, ClusterIP, NodePort, and LoadBalancer.
+    # More details: https://kubernetes.io/docs/concepts/services-networking/service/
+    type: ClusterIP
+    # -- clusterIP is the IP address of the service and is usually assigned randomly. If an address is specified manually,
+    # is in-range (as per system configuration), and is not in use, it will be allocated to the service.
+    clusterIP:
+    # -- Port of service in Kubernetes cluster
+    port: 8443
+    # -- NodePort port to allocate on each node (only if service.type = NodePort or Loadbalancer)
+    nodePort:
+    # -- Only applies to Service Type: LoadBalancer. This feature depends on whether the underlying cloud-provider supports specifying
+    # the loadBalancerIP when a load balancer is created.
+    loadBalancerIP: ""
+    # -- If specified and supported by the platform, traffic through the cloud-provider load-balancer
+    # will be restricted to the specified client IPs.
+    loadBalancerSourceRanges: []
+    # -- loadBalancerClass is the class of the load balancer implementation this Service belongs to.
+    loadBalancerClass: ""
+    # -- Denotes if this Service desires to route external traffic to node-local or cluster-wide endpoints.
+    # Use ``Local`` to preserve the client source IP, which matters for ``allowedIP``.
+    externalTrafficPolicy:
+    # -- Annotations for the Zabbix MCP Server service
+    annotations: {}
+  ingress:
+    # -- Enables a dedicated Ingress for the Zabbix MCP Server (endpoint path is ``/mcp``)
+    enabled: false
+    # -- Ingress class name
+    ingressClassName: ""
+    # -- Ingress annotations. If ``tls.enabled=true``, the backend protocol must be HTTPS (e.g. ``nginx.ingress.kubernetes.io/backend-protocol: HTTPS``)
+    annotations: {}
+    # -- Ingress hosts
+    hosts:
+    - host: zabbix-mcp.example.local
+      paths:
+      - path: /mcp
+        pathType: Prefix
+    # -- Ingress TLS configuration
+    tls: []
+    #  - secretName: zabbix-mcp-tls
+    #    hosts:
+    #      - zabbix-mcp.example.local
+  # -- Extra environment variables. A list of additional environment variables. See: https://hub.docker.com/r/zabbix/zabbix-mcp-server
+  extraEnv: []
+  # -- Annotations to add to the deployment
+  extraDeploymentAnnotations: {}
+  # -- Labels to add to the deployment
+  extraDeploymentLabels: {}
+  # -- Annotations to add to the pods
+  extraPodAnnotations: {}
+  # -- Labels to add to the pods
+  extraPodLabels: {}
+  # -- Additional volumeMounts to the Zabbix MCP Server container
+  extraVolumeMounts: []
+  # -- Additional containers to start within the Zabbix MCP Server pod
+  extraContainers: []
+  # -- Additional init containers to start within the Zabbix MCP Server pod
+  extraInitContainers: []
+  # -- Additional volumes to make available to the Zabbix MCP Server pod
+  extraVolumes: []
+  # -- Additional specifications to the Zabbix MCP Server pod
+  extraPodSpecs: {}
+  # -- Security Context configurations. Reference: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/
+  securityContext: {}
+  # -- The kubelet uses liveness probes to know when to restart a container. Reference: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/
+  livenessProbe:
+    tcpSocket:
+      port: mcp-server
+    initialDelaySeconds: 10
+    periodSeconds: 20
+  # -- The kubelet uses readiness probes to know when a container is ready to start accepting traffic. Reference: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/
+  readinessProbe:
+    tcpSocket:
+      port: mcp-server
+    initialDelaySeconds: 5
+    periodSeconds: 10
+  # -- The kubelet uses startup probes to know when a container application has started.  Reference: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/
+  startupProbe: {}
+  # -- nodeSelector configurations. Reference: https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/
+  nodeSelector: {}
+
 # **Zabbix Java Gateway** configurations
 zabbixJavaGateway:
   # -- Enables use of **Zabbix Java Gateway**

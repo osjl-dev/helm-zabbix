@@ -60,7 +60,7 @@ To test changes locally against a real cluster (e.g. `kind`), follow `charts/zab
 
 ### Template/value organization
 
-Every component follows the same pattern in `values.yaml`: a top-level key (`zabbixServer`, `zabbixProxy`, `zabbixAgent`, `zabbixWeb`, `zabbixWebService`, `zabbixJavaGateway`, `zabbixBrowserMonitoring`, `postgresql`) with `enabled`, `image`, `resources`, `extraEnv`, `extraVolumes`/`extraVolumeMounts`, `extraDeploymentAnnotations`/`extraDeploymentLabels`, `extraPodAnnotations`/`extraPodLabels`, etc. following consistent naming across components. `global.commonLabels` applies to all resources. When adding a new tunable, mirror the sibling component's pattern rather than inventing a new shape.
+Every component follows the same pattern in `values.yaml`: a top-level key (`zabbixServer`, `zabbixProxy`, `zabbixAgent`, `zabbixWeb`, `zabbixWebService`, `zabbixMcpServer`, `zabbixJavaGateway`, `zabbixBrowserMonitoring`, `postgresql`) with `enabled`, `image`, `resources`, `extraEnv`, `extraVolumes`/`extraVolumeMounts`, `extraDeploymentAnnotations`/`extraDeploymentLabels`, `extraPodAnnotations`/`extraPodLabels`, etc. following consistent naming across components. `global.commonLabels` applies to all resources. When adding a new tunable, mirror the sibling component's pattern rather than inventing a new shape.
 
 Each component's Kubernetes objects live in one template file named `<kind>-<component>.yaml` under `charts/zabbix/templates/` (e.g. `deployment-zabbix-server.yaml`, `statefulset-zabbix-proxy.yaml`, `daemonset-zabbix-agent.yaml`). Shared template helpers/macros are in `templates/_helpers.tpl`.
 

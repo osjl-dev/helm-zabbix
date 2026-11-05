@@ -34,6 +34,7 @@ This Helm chart installs [Zabbix](https://www.zabbix.com) in a Kubernetes cluste
   - [Zabbix Agent](#zabbix-agent)
   - [Zabbix Web (frontend)](#zabbix-web-frontend)
   - [Zabbix Web Service](#zabbix-web-service)
+  - [Zabbix MCP Server](#zabbix-mcp-server)
   - [Zabbix Proxy](#zabbix-proxy)
   - [PostgreSQL](#postgresql)
 - [Thanks](#thanks)
@@ -377,6 +378,48 @@ monitoring and view monitoring statistics
 
 **Zabbix Web Service** is a process that is used for communication with external web services 
 [Official documentation](https://www.zabbix.com/documentation/current/en/manual/concepts/web_service).
+
+## Zabbix MCP Server
+
+> [!NOTE]
+> Zabbix MCP Server is available since Zabbix 8.0 and is disabled by default. To enable it, set
+``zabbixMcpServer.enabled=true`` and use a Zabbix 8.0+ image, either via ``zabbixImageTag`` or
+``zabbixMcpServer.image.tag`` (e.g. ``ubuntu-8.0-latest``).
+
+**Zabbix MCP Server** lets AI agents work with Zabbix through the
+[Model Context Protocol](https://modelcontextprotocol.io) (Streamable HTTP transport). It is stateless
+and sits between MCP clients and the Zabbix API: every request must carry a Zabbix API token in the
+``Authorization: Bearer <token>`` header, and Zabbix enforces the token owner's permissions
+[Official documentation](https://www.zabbix.com/documentation/8.0/en/manual/concepts/mcp_server).
+
+By default the chart points the MCP server at the in-cluster Zabbix Web service of the same release
+(``http://<release>-zabbix-web:<port>/api_jsonrpc.php``). Use ``zabbixMcpServer.frontendURL`` to
+point it elsewhere (required if ``zabbixWeb.enabled=false``).
+
+The MCP endpoint is ``/mcp`` on port ``8443``. It can be exposed via ``zabbixMcpServer.service`` and/or
+``zabbixMcpServer.ingress``. Keep in mind:
+
+- ``zabbixMcpServer.allowedIP`` is checked against the source IP seen by the pod. Behind an Ingress
+  controller or a ``LoadBalancer`` service with ``externalTrafficPolicy: Cluster`` that is the
+  controller/node IP, not the real client IP.
+- TLS can either be terminated by an Ingress/reverse proxy (default, plain HTTP inside the cluster), or
+  served by the MCP server itself with ``zabbixMcpServer.tls.enabled=true`` and an existing Secret
+  (``zabbixMcpServer.tls.secretName``) holding the certificate and key.
+- Tool access can be restricted with ``zabbixMcpServer.toolAccess.*``. If any rule is set, it replaces
+  the image default policy, which denies ``item_get``, ``lld_get``, ``interface_get``, ``macro_get`` and
+  ``history_get``. Write tools (``problem_*``, ``maintenance_*``) are enabled by default.
+
+Quick check from inside the cluster:
+
+```bash
+kubectl port-forward service/<release>-zabbix-mcp-server 8443:8443 -n <namespace>
+
+curl -s http://127.0.0.1:8443/mcp \
+  -H "Authorization: Bearer <zabbix_api_token>" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
 
 ## Zabbix Proxy
 

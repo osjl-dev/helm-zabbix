@@ -87,11 +87,13 @@ See the [charts/zabbix/docs/example/README.md](charts/zabbix/docs/example/README
 │       │   ├── daemonset-zabbix-agent.yaml
 │       │   ├── deployment-webdriver.yaml
 │       │   ├── deployment-zabbix-java-gateway.yaml
+│       │   ├── deployment-zabbix-mcp-server.yaml   # Zabbix MCP Server (Zabbix >= 8.0)
 │       │   ├── deployment-zabbix-server.yaml
 │       │   ├── deployment-zabbix-webservice.yaml
 │       │   ├── deployment-zabbix-web.yaml
 │       │   ├── extra-manifests.yaml        # Renders arbitrary manifests from .Values.extraManifests
 │       │   ├── _helpers.tpl                # Shared template helpers/macros (labels, names, DB env vars, etc.)
+│       │   ├── ingress-zabbix-mcp-server.yaml  # Optional dedicated Ingress for the Zabbix MCP Server
 │       │   ├── ingress.yaml
 │       │   ├── job-create-upgrade-db.yaml  # Pre-install/pre-upgrade hook Job that prepares/migrates the DB schema
 │       │   ├── NOTES.txt                   # Post-install usage notes shown by helm
