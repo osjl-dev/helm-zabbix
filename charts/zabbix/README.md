@@ -1,6 +1,6 @@
 # Helm chart for Zabbix
 
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0) ![Version: 7.1.0](https://img.shields.io/badge/Version-7.1.0-informational?style=flat-square)  [![Downloads](https://img.shields.io/github/downloads/zabbix-community/helm-zabbix/total?label=Downloads
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0) ![Version: 8.1.0](https://img.shields.io/badge/Version-8.1.0-informational?style=flat-square)  [![Downloads](https://img.shields.io/github/downloads/zabbix-community/helm-zabbix/total?label=Downloads
 )](https://somsubhra.github.io/github-release-stats/?username=zabbix-community&repository=helm-zabbix&page=1&per_page=500#) [![Releases ChangeLog](https://img.shields.io/badge/Changelog-8A2BE2
 )](https://github.com/zabbix-community/helm-zabbix/releases)
 
@@ -19,6 +19,8 @@ This Helm chart installs [Zabbix](https://www.zabbix.com) in a Kubernetes cluste
 - [Troubleshooting](#troubleshooting)
 - [Uninstallation](#uninstallation)
 - [Breaking changes of this helm chart](#breaking-changes-of-this-helm-chart)
+  - [Version 8.1.0](#version-810)
+  - [Version 8.0.0](#version-800)
   - [Version 7.0.0](#version-700)
   - [Version 6.1.0](#version-610)
   - [Version 6.0.0](#version-600)
@@ -32,6 +34,7 @@ This Helm chart installs [Zabbix](https://www.zabbix.com) in a Kubernetes cluste
   - [Zabbix Agent](#zabbix-agent)
   - [Zabbix Web (frontend)](#zabbix-web-frontend)
   - [Zabbix Web Service](#zabbix-web-service)
+  - [Zabbix MCP Server](#zabbix-mcp-server)
   - [Zabbix Proxy](#zabbix-proxy)
   - [PostgreSQL](#postgresql)
 - [Thanks](#thanks)
@@ -48,12 +51,13 @@ This Helm chart installs [Zabbix](https://www.zabbix.com) in a Kubernetes cluste
 
 # Prerequisites
 
-- Kubernetes cluster 1.21+
-- Helm 3.0+
+- Kubernetes cluster 1.34+
+- Helm 4.0+
 - Kubectl
 - PV provisioner support in the underlying infrastructure (optional).
+- PostgreSQL 15 to 18, optionally with TimescaleDB 2.20 to 2.29, according to the [requirements of Zabbix 8.0](https://www.zabbix.com/documentation/8.0/en/manual/installation/requirements). The default is PostgreSQL 18.
 
-Install the ``kubectl`` and ``helm`` requirements following the instructions in this [tutorial](docs/requirements.md).
+Install the ``kubectl`` and ``helm`` requirements following the instructions in this [tutorial](https://github.com/zabbix-community/helm-zabbix/blob/main/charts/zabbix/docs/requirements.md).
 
 # Installation
 
@@ -83,7 +87,7 @@ helm search repo zabbix-community/zabbix -l
 Set the helm chart version you want to use. Example:
 
 ```bash
-export ZABBIX_CHART_VERSION='7.1.0'
+export ZABBIX_CHART_VERSION='8.1.0'
 ```
 
 Export default values of ``zabbix`` chart to ``$HOME/zabbix_values.yaml`` file:
@@ -102,7 +106,7 @@ helm upgrade --install zabbix zabbix-community/zabbix \
  --dependency-update \
  --create-namespace \
  --version $ZABBIX_CHART_VERSION \
- -f $HOME/zabbix_values.yaml -n monitoring --debug --dry-run
+ -f $HOME/zabbix_values.yaml -n monitoring --debug --dry-run=client
 ```
 
 Install/upgrade Zabbix with the command:
@@ -115,7 +119,7 @@ helm upgrade --install zabbix zabbix-community/zabbix \
  -f $HOME/zabbix_values.yaml -n monitoring --debug
 ```
 
-See the installation example in [kind](https://kind.sigs.k8s.io) cluster in this [tutorial](docs/example/README.md).
+See the installation example in [kind](https://kind.sigs.k8s.io) cluster in this [tutorial](https://github.com/zabbix-community/helm-zabbix/blob/main/charts/zabbix/docs/example/README.md).
 
 # How to access Zabbix
 
@@ -180,6 +184,55 @@ helm uninstall zabbix -n monitoring
 ```
 
 # Breaking changes of this helm chart
+
+## Version 8.1.0
+
+- Added support for [Zabbix MCP Server](#zabbix-mcp-server) (new ``zabbixMcpServer`` section in ``values.yaml``, disabled by default), with its own Service and optional Ingress.
+- No breaking changes, existing ``values.yaml`` files keep working.
+
+> [!WARNING]
+> Known issue, inherited from version 8.0.0: [Native Zabbix Server High Availability](#native-zabbix-server-high-availability)
+(``zabbixServer.zabbixServerHA.enabled=true``) doesn't work yet with Zabbix 8.0. The database job image
+``ghcr.io/zabbix-community/zabbix-server-create-upgrade-db:8.0-20261009150714`` isn't published. The only
+available 8.0 build, ``8.0-trunk-20261009150714``, is based on Zabbix 8.0.0rc2 and creates an older database
+schema (``7050195``), which Zabbix Server 8.0.0 (``8000000``) refuses to upgrade in HA mode. Until a job
+image built on Zabbix 8.0.0 is published, keep HA setups on Zabbix 7.x by setting ``zabbixImageTag``
+(for example ``ubuntu-7.0-latest``).
+
+## Version 8.0.0
+
+> [!CAUTION]
+> Back up your database before upgrading. The upgrade from Zabbix 7.x to 8.0 changes the database schema and can't be undone, and Zabbix Server takes time to finish it on large databases. See the [Zabbix upgrade notes](https://www.zabbix.com/documentation/8.0/en/manual/installation/upgrade_notes_800).
+
+> [!WARNING]
+> ``helm upgrade`` from a previous version fails with ``StatefulSet.apps "..." is invalid: spec: Forbidden: updates to statefulset spec for fields other than ...`` if ``postgresql.enabled=true`` or ``zabbixProxy.enabled=true``. The ``serviceName`` of the StatefulSets of PostgreSQL and Zabbix Proxy changed and Kubernetes doesn't allow to change it. Before upgrading, delete only the StatefulSets and keep their pods and volumes with ``--cascade=orphan``. The new StatefulSets adopt the pods and the PVCs and replace the pods during the upgrade:
+>
+> ```bash
+> kubectl delete statefulset -n monitoring --cascade=orphan zabbix-postgresql zabbix-zabbix-proxy
+> helm upgrade zabbix zabbix-community/zabbix --version 8.0.0 -n monitoring -f values.yaml
+> ```
+>
+> Change ``monitoring`` to your namespace and ``zabbix`` to the name of your release. The StatefulSets are named ``<release>-postgresql`` and ``<release>-zabbix-proxy`` (if ``fullnameOverride`` is set, ``<fullnameOverride>-postgresql`` and ``<fullnameOverride>-zabbix-proxy``); skip the ones that don't exist in your release.
+
+- This chart supports Zabbix 8.0, which is the new default of ``zabbixImageTag`` (``ubuntu-8.0.0``). Older versions of Zabbix are not supported or tested anymore. If you set ``zabbixImageTag`` or ``image.tag`` of any component in your ``values.yaml``, change them to a Zabbix 8.0 tag.
+- This chart requires Kubernetes 1.34 or newer, enforced by ``kubeVersion`` in ``Chart.yaml``, and it is tested only with Helm 4.
+- Zabbix 8.0 requires PostgreSQL 15 to 18 and TimescaleDB 2.20 to 2.29. Only PostgreSQL is supported, as before.
+- The default image of ``postgresql.image.tag`` and ``zabbixServer.haNodesAutoClean.image.tag`` changed from ``16`` to ``18``. PostgreSQL 18 can't start with the data of an older major version. If you use ``postgresql.enabled=true`` with persistence, before upgrading choose one of these options:
+  - keep your current version by setting ``postgresql.image.tag`` in your ``values.yaml``, if it is between 15 and 18;
+  - migrate the data with ``pg_dump`` and ``pg_restore`` to a new volume.
+- The images of Zabbix 8.0 have a new compiled entrypoint, which changed how some variables are used by this chart:
+  - ``zabbixProxy.ZBX_SERVER_PORT`` is now sent to the proxy in ``ZBX_SERVER_HOST``, as ``host:port``;
+  - ``zabbixProxy.ZBX_JAVAGATEWAY_ENABLE`` now configures the proxy to use the Java Gateway of this chart, with the new value ``zabbixJavaGateway.ZBX_STARTJAVAPOLLERS``;
+  - ``zabbixJavaGateway.ZABBIX_OPTIONS`` was removed, because the image doesn't use it anymore.
+- The default of ``zabbixProxy.ZBX_DEBUGLEVEL`` changed from ``4`` to ``3``, because the Zabbix Proxy process of the ``alpine-8.0.0`` image crashes and restarts in a loop with debug level ``4``. The ``ubuntu-8.0.0`` image doesn't have this problem.
+- The StatefulSets of PostgreSQL and Zabbix Proxy now use the new headless Services ``<release>-postgresql-headless`` and ``<release>-zabbix-proxy-headless`` in ``serviceName``. Before, they pointed to a Service that doesn't exist. Each pod now has a stable DNS name, such as ``<release>-zabbix-proxy-0.<release>-zabbix-proxy-headless.<namespace>.svc``. See the warning above to upgrade.
+- These errors in the templates were fixed and can change the behavior of your release:
+  - Zabbix Server now uses the correct Service of the Java Gateway (``<release>-java-gateway``) and starts ``zabbixJavaGateway.ZBX_STARTJAVAPOLLERS`` Java pollers;
+  - the HA Labels sidecar is now deployed when Zabbix Server HA is enabled, even with ``zabbixAgent.runAsSidecar=false`` or ``zabbixAgent.enabled=false``;
+  - ``podAntiAffinity`` of Zabbix Web, Web Service, Java Gateway and WebDriver now selects the correct pods, so their replicas are really spread over the nodes;
+  - ``ZBX_WEBDRIVERURL`` is now only set when ``zabbixBrowserMonitoring.enabled=true``;
+  - the ``<release>-db-access`` Secret now always follows ``postgresAccess`` and, without ``postgresAccess.password``, keeps the password generated in the first installation;
+  - ``extraInitContainers``, ``extraContainers``, ``jobLabels`` and ``image.pullSecrets`` of the database job, and ``extraEnv`` and ``image.pullSecrets`` of ``zabbixServer.haNodesAutoClean``, now work.
 
 ## Version 7.0.0
 
@@ -295,9 +348,10 @@ possible is possible, while still obtaining a good level of security.
 > About the Zabbix version supported
 
 - This helm chart is compatible with non-LTS version of Zabbix, that include important changes and functionalities.
-- But by default this helm chart will install the latest LTS version (example: 7.0.x).
-See more info in [Zabbix Life Cycle & Release Policy](https://www.zabbix.com/life_cycle_and_release_policy) page
-- When you want use a non-LTS version (example: 7.4.x), you have to set this in ``values.yaml`` yourself. This Helm Chart is actively being tested with the current non-LTS major releases, so it will be most probably working without any problem just setting `zabbixImageTag`, for example to the value of `ubuntu-7.4.0` or `alpine-7.4-latest`.
+- But by default this helm chart will install the latest LTS version (example: 8.0.x).
+- See more info in [Zabbix Life Cycle & Release Policy](https://www.zabbix.com/life_cycle_and_release_policy) page
+- When you want use a non-LTS version (example: 8.x.y), you have to set this in ``values.yaml`` yourself.
+This Helm Chart is actively being tested with the current non-LTS major releases, so it will be most probably working without any problem just setting `zabbixImageTag`, for example to the value of `ubuntu-8.x.y` or `alpine-8.x-latest`.
 
 ## Zabbix Server
 
@@ -336,6 +390,48 @@ monitoring and view monitoring statistics
 
 **Zabbix Web Service** is a process that is used for communication with external web services
 [Official documentation](https://www.zabbix.com/documentation/current/en/manual/concepts/web_service).
+
+## Zabbix MCP Server
+
+> [!NOTE]
+> Zabbix MCP Server is available since Zabbix 8.0 (the default version of this chart) and is disabled by default. To enable it, set
+``zabbixMcpServer.enabled=true``. If you override ``zabbixImageTag`` with an older version, set
+``zabbixMcpServer.image.tag`` to a Zabbix 8.0+ image (e.g. ``ubuntu-8.0-latest``).
+
+**Zabbix MCP Server** lets AI agents work with Zabbix through the
+[Model Context Protocol](https://modelcontextprotocol.io) (Streamable HTTP transport). It is stateless
+and sits between MCP clients and the Zabbix API: every request must carry a Zabbix API token in the
+``Authorization: Bearer <token>`` header, and Zabbix enforces the token owner's permissions
+[Official documentation](https://www.zabbix.com/documentation/8.0/en/manual/concepts/mcp_server).
+
+By default the chart points the MCP server at the in-cluster Zabbix Web service of the same release
+(``http://<release>-zabbix-web:<port>/api_jsonrpc.php``). Use ``zabbixMcpServer.frontendURL`` to
+point it elsewhere (required if ``zabbixWeb.enabled=false``).
+
+The MCP endpoint is ``/mcp`` on port ``8443``. It can be exposed via ``zabbixMcpServer.service`` and/or
+``zabbixMcpServer.ingress``. Keep in mind:
+
+- ``zabbixMcpServer.allowedIP`` is checked against the source IP seen by the pod. Behind an Ingress
+  controller or a ``LoadBalancer`` service with ``externalTrafficPolicy: Cluster`` that is the
+  controller/node IP, not the real client IP.
+- TLS can either be terminated by an Ingress/reverse proxy (default, plain HTTP inside the cluster), or
+  served by the MCP server itself with ``zabbixMcpServer.tls.enabled=true`` and an existing Secret
+  (``zabbixMcpServer.tls.secretName``) holding the certificate and key.
+- Tool access can be restricted with ``zabbixMcpServer.toolAccess.*``. If any rule is set, it replaces
+  the image default policy, which denies ``item_get``, ``lld_get``, ``interface_get``, ``macro_get`` and
+  ``history_get``. Write tools (``problem_*``, ``maintenance_*``) are enabled by default.
+
+Quick check from inside the cluster:
+
+```bash
+kubectl port-forward service/<release>-zabbix-mcp-server 8443:8443 -n <namespace>
+
+curl -s http://127.0.0.1:8443/mcp \
+  -H "Authorization: Bearer <zabbix_api_token>" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
 
 ## Zabbix Proxy
 
@@ -427,7 +523,7 @@ The following tables lists the configurable parameters of the chart and their de
 | postgresql.image.pullPolicy | string | `"IfNotPresent"` | Pull policy of Docker image |
 | postgresql.image.pullSecrets | list | `[]` | List of dockerconfig secrets names to use when pulling images |
 | postgresql.image.repository | string | `"postgres"` | Postgresql Docker image name: chose one of "postgres" or "timescale/timescaledb" |
-| postgresql.image.tag | int | `16` | Tag of Docker image of Postgresql server, choice "16" for postgres "2.17.2-pg16" for timescaledb (Zabbix supports TimescaleDB. More info: https://www.zabbix.com/documentation/7.0/en/manual/installation/requirements) |
+| postgresql.image.tag | int | `18` | Tag of Docker image of Postgresql server, choice "18" for postgres "2.29.2-pg18" for timescaledb (Zabbix 8.0 supports PostgreSQL 15 to 18 and TimescaleDB 2.20 to 2.29. More info: https://www.zabbix.com/documentation/8.0/en/manual/installation/requirements) |
 | postgresql.livenessProbe | object | `{}` | The kubelet uses liveness probes to know when to restart a container. Reference: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/ |
 | postgresql.nodeSelector | object | `{}` | nodeSelector configurations. Reference: https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/ |
 | postgresql.persistence.enabled | bool | `false` | Whether to enable persistent storage for the postgres container or not |
@@ -538,11 +634,11 @@ The following tables lists the configurable parameters of the chart and their de
 | zabbixBrowserMonitoring.webdriver.port2 | int | `7900` | WebDriver container port 2 |
 | zabbixBrowserMonitoring.webdriver.replicaCount | int | `1` | Number of replicas of ``zabbixWebDriver`` module |
 | zabbixBrowserMonitoring.webdriver.resources | object | `{}` | Requests and limits of pod resources. See: [https://kubernetes.io/docs/concepts/configuration/manage-resources-containers](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers) |
-| zabbixImageTag | string | `"ubuntu-7.0.23"` | Zabbix components (server, agent, web frontend, ...) image tag to use. This helm chart is compatible with non-LTS version of Zabbix, that include important changes and functionalities. But by default this helm chart will install the latest LTS version (example: 7.0.x). See more info in [Zabbix Life Cycle & Release Policy](https://www.zabbix.com/life_cycle_and_release_policy) page When you want use a non-LTS version (example: 7.4.x), you have to set this yourself. You can change version here or overwrite in each component (example: zabbixserver.image.tag, etc). |
-| zabbixJavaGateway.ZABBIX_OPTIONS | string | `""` | Additional arguments for Zabbix Java Gateway. Useful to enable additional libraries and features. |
+| zabbixImageTag | string | `"ubuntu-8.0.0"` | Zabbix components (server, agent, web frontend, ...) image tag to use. This helm chart is compatible with non-LTS version of Zabbix, that include important changes and functionalities. But by default this helm chart will install the latest LTS version (example: 8.0.x). See more info in [Zabbix Life Cycle & Release Policy](https://www.zabbix.com/life_cycle_and_release_policy) page You can change the version here or overwrite in each component (example: zabbixServer.image.tag, etc). |
 | zabbixJavaGateway.ZBX_DEBUGLEVEL | int | `3` | The variable is used to specify debug level, from 0 to 5 |
 | zabbixJavaGateway.ZBX_JAVAGATEWAY | string | `"zabbix-java-gateway"` |  |
 | zabbixJavaGateway.ZBX_PROPERTIES_FILE | string | `""` | Name of properties file. Can be used to set additional properties using a key-value format in such a way that they are not visible on a command line or to overwrite existing ones. |
+| zabbixJavaGateway.ZBX_STARTJAVAPOLLERS | int | `5` | Number of Java pollers started in Zabbix Server and in Zabbix Proxy to use the Java Gateway |
 | zabbixJavaGateway.ZBX_START_POLLERS | int | `5` | This variable is specified amount of pollers. By default, value is 5 |
 | zabbixJavaGateway.ZBX_TIMEOUT | int | `3` | This variable is used to specify timeout for outgoing connections. By default, value is 3. |
 | zabbixJavaGateway.enabled | bool | `false` | Enables use of **Zabbix Java Gateway** |
@@ -580,9 +676,62 @@ The following tables lists the configurable parameters of the chart and their de
 | zabbixJavaGateway.service.type | string | `"ClusterIP"` | Type of service to expose the application. Valid options are ExternalName, ClusterIP, NodePort, and LoadBalancer. More details: https://kubernetes.io/docs/concepts/services-networking/service/ |
 | zabbixJavaGateway.startupProbe | object | `{"failureThreshold":5,"initialDelaySeconds":15,"periodSeconds":5,"successThreshold":1,"tcpSocket":{"port":"zabbix-java-gw"},"timeoutSeconds":3}` | The kubelet uses startup probes to know when a container application has started.  Reference: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/ |
 | zabbixJavaGateway.startupProbe.tcpSocket.port | string | `"zabbix-java-gw"` | Port number/alias name of the container |
-| zabbixProxy.ZBX_DEBUGLEVEL | int | `4` |  |
+| zabbixMcpServer.allowedIP | string | `"0.0.0.0/0,::/0"` | Comma-separated list of IP addresses/CIDRs of MCP clients allowed to connect (ZBX_ALLOWEDIP). Clients reaching the server through an Ingress/LoadBalancer are seen with the proxy/node IP. Restrict this in production. |
+| zabbixMcpServer.debugLevel | string | `nil` | Debug level (ZBX_DEBUGLEVEL, 0-5). Image default is 3 if not set |
+| zabbixMcpServer.enabled | bool | `false` | Enables use of **Zabbix MCP Server**. Requires Zabbix >= 8.0 (the default ``zabbixImageTag``) |
+| zabbixMcpServer.extraContainers | list | `[]` | Additional containers to start within the Zabbix MCP Server pod |
+| zabbixMcpServer.extraDeploymentAnnotations | object | `{}` | Annotations to add to the deployment |
+| zabbixMcpServer.extraDeploymentLabels | object | `{}` | Labels to add to the deployment |
+| zabbixMcpServer.extraEnv | list | `[]` | Extra environment variables. A list of additional environment variables. See: https://hub.docker.com/r/zabbix/zabbix-mcp-server |
+| zabbixMcpServer.extraInitContainers | list | `[]` | Additional init containers to start within the Zabbix MCP Server pod |
+| zabbixMcpServer.extraPodAnnotations | object | `{}` | Annotations to add to the pods |
+| zabbixMcpServer.extraPodLabels | object | `{}` | Labels to add to the pods |
+| zabbixMcpServer.extraPodSpecs | object | `{}` | Additional specifications to the Zabbix MCP Server pod |
+| zabbixMcpServer.extraVolumeMounts | list | `[]` | Additional volumeMounts to the Zabbix MCP Server container |
+| zabbixMcpServer.extraVolumes | list | `[]` | Additional volumes to make available to the Zabbix MCP Server pod |
+| zabbixMcpServer.frontendURL | string | `""` | Zabbix API endpoint (ZBX_FRONTEND_URL), must end with ``api_jsonrpc.php``. If empty, the in-cluster Zabbix Web service of this release is used, e.g. ``http://<release>-zabbix-web:80/api_jsonrpc.php`` |
+| zabbixMcpServer.ignoreURLCertErrors | bool | `false` | Skip TLS certificate validation for Zabbix API requests (ZBX_IGNOREURLCERTERRORS). Development only! |
+| zabbixMcpServer.image.pullPolicy | string | `"IfNotPresent"` | Pull policy of Docker image |
+| zabbixMcpServer.image.pullSecrets | list | `[]` | List of dockerconfig secrets names to use when pulling images |
+| zabbixMcpServer.image.repository | string | `"zabbix/zabbix-mcp-server"` | Zabbix MCP Server Docker image name |
+| zabbixMcpServer.image.tag | string | `nil` | Zabbix MCP Server Docker image tag, if you want to override zabbixImageTag. Must be >= 8.0, e.g. ``ubuntu-8.0-latest`` |
+| zabbixMcpServer.ingress.annotations | object | `{}` | Ingress annotations. If ``tls.enabled=true``, the backend protocol must be HTTPS (e.g. ``nginx.ingress.kubernetes.io/backend-protocol: HTTPS``) |
+| zabbixMcpServer.ingress.enabled | bool | `false` | Enables a dedicated Ingress for the Zabbix MCP Server (endpoint path is ``/mcp``) |
+| zabbixMcpServer.ingress.hosts | list | `[{"host":"zabbix-mcp.example.local","paths":[{"path":"/mcp","pathType":"Prefix"}]}]` | Ingress hosts |
+| zabbixMcpServer.ingress.ingressClassName | string | `""` | Ingress class name |
+| zabbixMcpServer.ingress.tls | list | `[]` | Ingress TLS configuration |
+| zabbixMcpServer.livenessProbe | object | `{"initialDelaySeconds":10,"periodSeconds":20,"tcpSocket":{"port":"mcp-server"}}` | The kubelet uses liveness probes to know when to restart a container. Reference: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/ |
+| zabbixMcpServer.maxResponseSize | string | `nil` | Maximum size of a tool response (ZBX_MAX_RESPONSE_SIZE, 16K-256K). Image default is 64K if not set |
+| zabbixMcpServer.nodeSelector | object | `{}` | nodeSelector configurations. Reference: https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/ |
+| zabbixMcpServer.podAntiAffinity | bool | `true` | Set permissive podAntiAffinity to spread replicas over cluster nodes if replicaCount>1 |
+| zabbixMcpServer.port | int | `8443` | Port the Zabbix MCP Server listens on inside the container (ZBX_LISTENPORT, range 1024-32767) |
+| zabbixMcpServer.readinessProbe | object | `{"initialDelaySeconds":5,"periodSeconds":10,"tcpSocket":{"port":"mcp-server"}}` | The kubelet uses readiness probes to know when a container is ready to start accepting traffic. Reference: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/ |
+| zabbixMcpServer.replicaCount | int | `1` | Number of replicas of ``zabbixMcpServer`` module. The MCP server is stateless, so it can be scaled horizontally |
+| zabbixMcpServer.resources | object | `{}` | Requests and limits of pod resources. See: [https://kubernetes.io/docs/concepts/configuration/manage-resources-containers](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers) |
+| zabbixMcpServer.securityContext | object | `{}` | Security Context configurations. Reference: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/ |
+| zabbixMcpServer.service.annotations | object | `{}` | Annotations for the Zabbix MCP Server service |
+| zabbixMcpServer.service.clusterIP | string | `nil` | clusterIP is the IP address of the service and is usually assigned randomly. If an address is specified manually, is in-range (as per system configuration), and is not in use, it will be allocated to the service. |
+| zabbixMcpServer.service.externalTrafficPolicy | string | `nil` | Denotes if this Service desires to route external traffic to node-local or cluster-wide endpoints. Use ``Local`` to preserve the client source IP, which matters for ``allowedIP``. |
+| zabbixMcpServer.service.loadBalancerClass | string | `""` | loadBalancerClass is the class of the load balancer implementation this Service belongs to. |
+| zabbixMcpServer.service.loadBalancerIP | string | `""` | Only applies to Service Type: LoadBalancer. This feature depends on whether the underlying cloud-provider supports specifying the loadBalancerIP when a load balancer is created. |
+| zabbixMcpServer.service.loadBalancerSourceRanges | list | `[]` | If specified and supported by the platform, traffic through the cloud-provider load-balancer will be restricted to the specified client IPs. |
+| zabbixMcpServer.service.nodePort | string | `nil` | NodePort port to allocate on each node (only if service.type = NodePort or Loadbalancer) |
+| zabbixMcpServer.service.port | int | `8443` | Port of service in Kubernetes cluster |
+| zabbixMcpServer.service.type | string | `"ClusterIP"` | Type of service to expose the application. Valid options are ExternalName, ClusterIP, NodePort, and LoadBalancer. More details: https://kubernetes.io/docs/concepts/services-networking/service/ |
+| zabbixMcpServer.startupProbe | object | `{}` | The kubelet uses startup probes to know when a container application has started.  Reference: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/ |
+| zabbixMcpServer.timeout | string | `nil` | Timeout in seconds for Zabbix API requests (ZBX_TIMEOUT, 3-30). Image default is 10 if not set |
+| zabbixMcpServer.tls.certFile | string | `"tls.crt"` | File name of the certificate inside the Secret (ZBX_TLSCERTFILE) |
+| zabbixMcpServer.tls.enabled | bool | `false` | Serve HTTPS directly from the MCP server (ZBX_TLSACCEPT=cert). Leave disabled when TLS is terminated by an Ingress/reverse proxy |
+| zabbixMcpServer.tls.keyFile | string | `"tls.key"` | File name of the private key inside the Secret (ZBX_TLSKEYFILE) |
+| zabbixMcpServer.tls.secretName | string | `""` | Name of an existing Secret with the certificate and key, mounted read-only at ``/var/lib/zabbix/enc``. A ``kubernetes.io/tls`` Secret works as is |
+| zabbixMcpServer.toolAccess.allowTool | list | `[]` | List of tool names to allow (ZBX_ALLOWTOOL_<N>), e.g. ``["history_get"]`` |
+| zabbixMcpServer.toolAccess.allowToolRegexp | list | `[]` | List of regular expressions of tool names to allow (ZBX_ALLOWTOOL_REGEXP_<N>) |
+| zabbixMcpServer.toolAccess.denyTool | list | `[]` | List of tool names to deny (ZBX_DENYTOOL_<N>), e.g. ``["maintenance_delete"]`` |
+| zabbixMcpServer.toolAccess.denyToolRegexp | list | `[]` | List of regular expressions of tool names to deny (ZBX_DENYTOOL_REGEXP_<N>), e.g. ``["^maintenance_"]`` |
+| zabbixMcpServer.toolPrefix | string | `nil` | Prefix prepended to exposed tool names (ZBX_TOOL_PREFIX) |
+| zabbixProxy.ZBX_DEBUGLEVEL | int | `3` |  |
 | zabbixProxy.ZBX_HOSTNAME | string | `"zabbix-proxy"` | Zabbix Proxy hostname. Case sensitive hostname. If not defined the pod name will be used |
-| zabbixProxy.ZBX_JAVAGATEWAY_ENABLE | bool | `false` | The variable enable communication with Zabbix Java Gateway to collect Java related checks. By default, value is false. |
+| zabbixProxy.ZBX_JAVAGATEWAY_ENABLE | bool | `false` | The variable enable communication with the Zabbix Java Gateway of this helm chart (zabbixJavaGateway.enabled) to collect Java related checks. By default, value is false. |
 | zabbixProxy.ZBX_PROXYMODE | int | `0` | The variable allows to switch Zabbix Proxy mode. By default, value is 0 - active proxy. Allowed values are 0 and 1. |
 | zabbixProxy.ZBX_SERVER_HOST | string | `"zabbix-zabbix-server"` | Zabbix Server host |
 | zabbixProxy.ZBX_SERVER_PORT | int | `10051` | Zabbix Server port |
@@ -633,7 +782,7 @@ The following tables lists the configurable parameters of the chart and their de
 | zabbixServer.extraPodSpecs | object | `{}` | Additional specifications to the Zabbix Server pod |
 | zabbixServer.extraVolumeMounts | list | `[]` | Additional volumeMounts to the Zabbix Server container |
 | zabbixServer.extraVolumes | list | `[]` | Additional volumes to make available to the Zabbix Server pod |
-| zabbixServer.haNodesAutoClean | object | `{"concurrencyPolicy":"Replace","cronjobLabels":{},"deleteOlderThanSeconds":3600,"enabled":true,"extraContainers":[],"extraEnv":[],"extraInitContainers":[],"extraPodSpecs":{},"extraVolumeMounts":[],"extraVolumes":[],"image":{"pullPolicy":"IfNotPresent","pullSecrets":[],"repository":"postgres","tag":16},"resources":{},"schedule":"0 1 * * *","securityContext":{}}` | Automatically clean orphaned ha nodes from ha_nodes db table |
+| zabbixServer.haNodesAutoClean | object | `{"concurrencyPolicy":"Replace","cronjobLabels":{},"deleteOlderThanSeconds":3600,"enabled":true,"extraContainers":[],"extraEnv":[],"extraInitContainers":[],"extraPodSpecs":{},"extraVolumeMounts":[],"extraVolumes":[],"image":{"pullPolicy":"IfNotPresent","pullSecrets":[],"repository":"postgres","tag":18},"resources":{},"schedule":"0 1 * * *","securityContext":{}}` | Automatically clean orphaned ha nodes from ha_nodes db table |
 | zabbixServer.haNodesAutoClean.cronjobLabels | object | `{}` | Labels to add to the cronjob for ha nodes autoclean |
 | zabbixServer.haNodesAutoClean.extraContainers | list | `[]` | Additional containers to start within the cronjob hanodes autoclean |
 | zabbixServer.haNodesAutoClean.extraEnv | list | `[]` | Extra environment variables. A list of additional environment variables. |
@@ -642,7 +791,7 @@ The following tables lists the configurable parameters of the chart and their de
 | zabbixServer.haNodesAutoClean.extraVolumeMounts | list | `[]` | Additional volumeMounts to the cronjob hanodes autoclean |
 | zabbixServer.haNodesAutoClean.extraVolumes | list | `[]` | Additional volumes to make available to the cronjob hanodes autoclean |
 | zabbixServer.haNodesAutoClean.image.repository | string | `"postgres"` | Postgresql Docker image name: chose one of "postgres" or "timescale/timescaledb" |
-| zabbixServer.haNodesAutoClean.image.tag | int | `16` | Tag of Docker image of Postgresql server, choice "16" for postgres "2.17.2-pg16" for timescaledb (Zabbix supports TimescaleDB. More info: https://www.zabbix.com/documentation/7.0/en/manual/installation/requirements) |
+| zabbixServer.haNodesAutoClean.image.tag | int | `18` | Tag of Docker image of Postgresql server, choice "18" for postgres "2.29.2-pg18" for timescaledb (Zabbix 8.0 supports PostgreSQL 15 to 18 and TimescaleDB 2.20 to 2.29. More info: https://www.zabbix.com/documentation/8.0/en/manual/installation/requirements) |
 | zabbixServer.haNodesAutoClean.resources | object | `{}` | Requests and limits of pod resources. See: [https://kubernetes.io/docs/concepts/configuration/manage-resources-containers](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers) |
 | zabbixServer.haNodesAutoClean.securityContext | object | `{}` | Security Context configurations. Reference: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/ |
 | zabbixServer.hostIP | string | `"0.0.0.0"` | Optional set hostIP different from 0.0.0.0 to open port only on this IP |
@@ -669,19 +818,19 @@ The following tables lists the configurable parameters of the chart and their de
 | zabbixServer.service.sessionAffinity | string | `"None"` | Supports "ClientIP" and "None". Used to maintain session affinity. Enable client IP based session affinity. Must be ClientIP or None. Defaults to None. More info: https://kubernetes.io/docs/concepts/services-networking/service/#virtual-ips-and-service-proxies |
 | zabbixServer.service.type | string | `"ClusterIP"` | Type of service to expose the application. Valid options are ExternalName, ClusterIP, NodePort, and LoadBalancer. More details: https://kubernetes.io/docs/concepts/services-networking/service/ |
 | zabbixServer.startupProbe | object | `{}` | The kubelet uses startup probes to know when a container application has started.  Reference: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/ |
-| zabbixServer.zabbixServerHA | object | `{"dbCreateUpgradeJob":{"extraContainers":[],"extraInitContainers":[],"extraPodSpecs":{},"extraVolumeMounts":[],"extraVolumes":[],"image":{"pullPolicy":"IfNotPresent","pullSecrets":[],"repository":"ghcr.io/zabbix-community/zabbix-server-create-upgrade-db","tag":"","tagSuffix":"20241230222241"},"resources":{},"securityContext":{}},"enabled":false,"haLabelsSidecar":{"extraVolumeMounts":[],"image":{"pullPolicy":"IfNotPresent","pullSecrets":[],"repository":"ghcr.io/zabbix-community/zabbix-server-ha-label-manager","tag":"20241230230305"},"labelName":"zabbix.com/server-ha-role","resources":{},"securityContext":{}},"role":{"annotations":{}},"roleBinding":{"annotations":{}},"serviceAccount":{"annotations":{}}}` | Section responsible for native Zabbix Server High Availability support of this Helm Chart |
-| zabbixServer.zabbixServerHA.dbCreateUpgradeJob | object | `{"extraContainers":[],"extraInitContainers":[],"extraPodSpecs":{},"extraVolumeMounts":[],"extraVolumes":[],"image":{"pullPolicy":"IfNotPresent","pullSecrets":[],"repository":"ghcr.io/zabbix-community/zabbix-server-create-upgrade-db","tag":"","tagSuffix":"20241230222241"},"resources":{},"securityContext":{}}` | Settings for the database initialization / upgrade job needed for HA enabled setups |
+| zabbixServer.zabbixServerHA | object | `{"dbCreateUpgradeJob":{"extraContainers":[],"extraInitContainers":[],"extraPodSpecs":{},"extraVolumeMounts":[],"extraVolumes":[],"image":{"pullPolicy":"IfNotPresent","pullSecrets":[],"repository":"ghcr.io/zabbix-community/zabbix-server-create-upgrade-db","tag":"","tagSuffix":"20261009150714"},"resources":{},"securityContext":{}},"enabled":false,"haLabelsSidecar":{"extraVolumeMounts":[],"image":{"pullPolicy":"IfNotPresent","pullSecrets":[],"repository":"ghcr.io/zabbix-community/zabbix-server-ha-label-manager","tag":"20241230230305"},"labelName":"zabbix.com/server-ha-role","resources":{},"securityContext":{}},"role":{"annotations":{}},"roleBinding":{"annotations":{}},"serviceAccount":{"annotations":{}}}` | Section responsible for native Zabbix Server High Availability support of this Helm Chart |
+| zabbixServer.zabbixServerHA.dbCreateUpgradeJob | object | `{"extraContainers":[],"extraInitContainers":[],"extraPodSpecs":{},"extraVolumeMounts":[],"extraVolumes":[],"image":{"pullPolicy":"IfNotPresent","pullSecrets":[],"repository":"ghcr.io/zabbix-community/zabbix-server-create-upgrade-db","tag":"","tagSuffix":"20261009150714"},"resources":{},"securityContext":{}}` | Settings for the database initialization / upgrade job needed for HA enabled setups |
 | zabbixServer.zabbixServerHA.dbCreateUpgradeJob.extraContainers | list | `[]` | Additional containers to start within the dbCreateUpgradeJob pod |
 | zabbixServer.zabbixServerHA.dbCreateUpgradeJob.extraInitContainers | list | `[]` | Additional init containers to start within the dbCreateUpgradeJob pod |
 | zabbixServer.zabbixServerHA.dbCreateUpgradeJob.extraPodSpecs | object | `{}` | Additional specifications to the dbCreateUpgradeJob pod |
 | zabbixServer.zabbixServerHA.dbCreateUpgradeJob.extraVolumeMounts | list | `[]` | Additional volumeMounts to the dbCreateUpgradeJob pod |
 | zabbixServer.zabbixServerHA.dbCreateUpgradeJob.extraVolumes | list | `[]` | Additional volumes to make available to the dbCreateUpgradeJob pod |
-| zabbixServer.zabbixServerHA.dbCreateUpgradeJob.image | object | `{"pullPolicy":"IfNotPresent","pullSecrets":[],"repository":"ghcr.io/zabbix-community/zabbix-server-create-upgrade-db","tag":"","tagSuffix":"20241230222241"}` | Image settings for the database initialization / upgrade job |
+| zabbixServer.zabbixServerHA.dbCreateUpgradeJob.image | object | `{"pullPolicy":"IfNotPresent","pullSecrets":[],"repository":"ghcr.io/zabbix-community/zabbix-server-create-upgrade-db","tag":"","tagSuffix":"20261009150714"}` | Image settings for the database initialization / upgrade job |
 | zabbixServer.zabbixServerHA.dbCreateUpgradeJob.image.pullPolicy | string | `"IfNotPresent"` | Pull policy for the db initialization / upgrade job |
 | zabbixServer.zabbixServerHA.dbCreateUpgradeJob.image.pullSecrets | list | `[]` | Pull secrets for the db initialization / upgrade job |
 | zabbixServer.zabbixServerHA.dbCreateUpgradeJob.image.repository | string | `"ghcr.io/zabbix-community/zabbix-server-create-upgrade-db"` | Image repository for the database initialization / upgrade job |
-| zabbixServer.zabbixServerHA.dbCreateUpgradeJob.image.tag | string | `""` | it is going to be chosen based of the zabbix_server pod container otherwise |
-| zabbixServer.zabbixServerHA.dbCreateUpgradeJob.image.tagSuffix | string | `"20241230222241"` | The tag suffix used for the dbCreateUpgradeJob's image when not explicitly specifying a tag for the image. The tag name will be concatenated with major release of zabbix_server image if specified |
+| zabbixServer.zabbixServerHA.dbCreateUpgradeJob.image.tag | string | `""` | Tag of the image to use for the dbCreateUpgradeJob. Don't override this if you don't have a specific reason. If empty, it is going to be chosen based on the major release of the zabbix_server image and tagSuffix. |
+| zabbixServer.zabbixServerHA.dbCreateUpgradeJob.image.tagSuffix | string | `"20261009150714"` | The tag suffix used for the dbCreateUpgradeJob's image when not explicitly specifying a tag for the image. The tag name will be concatenated with major release of zabbix_server image if specified |
 | zabbixServer.zabbixServerHA.dbCreateUpgradeJob.resources | object | `{}` | Resource requests and limits for the dbCreateUpgradeJob pod |
 | zabbixServer.zabbixServerHA.dbCreateUpgradeJob.securityContext | object | `{}` | Security Context configurations. Reference: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/ |
 | zabbixServer.zabbixServerHA.enabled | bool | `false` | Enables support for Zabbix Server High Availability. If disabled, replicaCount will always be 1. Can not be combined with ``postgresql.enabled=true`` |
@@ -845,7 +994,7 @@ metadata:
   name: zabbix-db
 spec:
   instances: 3
-  imageName: ghcr.io/cloudnative-pg/postgresql:16
+  imageName: ghcr.io/cloudnative-pg/postgresql:18
   storage:
     size: 5Gi
 ```
@@ -886,3 +1035,9 @@ Name that you can then give to your zabbix proxies on the zabbix server side.
 > [!IMPORTANT]
 > You will need to deploy proxy service per replica if you want the Active Agent checks to work.
 > **If not defined the pod name will be used.**
+
+Each replica has a stable DNS name from the headless Service ``<release>-zabbix-proxy-headless``, that you can use as the address of the proxy in the proxy group, for agents inside the cluster:
+
+```text
+<release>-zabbix-proxy-<N>.<release>-zabbix-proxy-headless.<namespace>.svc.cluster.local
+```

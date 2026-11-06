@@ -1,0 +1,189 @@
+{{- if .Values.zabbixMcpServer.enabled }}
+{{- $frontendURL := .Values.zabbixMcpServer.frontendURL }}
+{{- if not $frontendURL }}
+{{- if not .Values.zabbixWeb.enabled }}
+{{- fail "zabbixMcpServer.frontendURL must be set when zabbixWeb.enabled=false" }}
+{{- end }}
+{{- $scheme := ternary "https" "http" (eq (int .Values.zabbixWeb.port) 8443) }}
+{{- $frontendURL = printf "%s://%s-zabbix-web:%v/api_jsonrpc.php" $scheme (include "zabbix.fullname" .) .Values.zabbixWeb.service.port }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ template "zabbix.fullname" . }}-zabbix-mcp-server
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "zabbix.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mcp-server
+    {{- if .Values.zabbixMcpServer.extraDeploymentLabels }}
+    {{- toYaml .Values.zabbixMcpServer.extraDeploymentLabels | nindent 4 }}
+    {{- end }}
+  annotations:
+    {{- range $key,$value := .Values.zabbixMcpServer.extraDeploymentAnnotations }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+spec:
+  replicas: {{ .Values.zabbixMcpServer.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "zabbix.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: mcp-server
+  template:
+    metadata:
+      annotations:
+        {{- range $key,$value := .Values.zabbixMcpServer.extraPodAnnotations }}
+        {{ $key }}: {{ $value | quote }}
+        {{- end }}
+      labels:
+        {{- include "zabbix.labels" . | nindent 8 }}
+        app.kubernetes.io/component: mcp-server
+        {{- if .Values.zabbixMcpServer.extraPodLabels }}
+        {{- toYaml .Values.zabbixMcpServer.extraPodLabels | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ template "zabbix.serviceAccountName" . }}
+      {{- with .Values.zabbixMcpServer.extraPodSpecs }}
+      {{- toYaml . | nindent 6 }}
+      {{- end }}
+      {{- with .Values.zabbixMcpServer.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if gt (len .Values.affinity) 0 }}
+      affinity:
+        {{- toYaml .Values.affinity | nindent 8 }}
+      {{- else if .Values.zabbixMcpServer.podAntiAffinity }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 1
+            podAffinityTerm:
+              topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  {{- include "zabbix.selectorLabels" . | nindent 18 }}
+                  app.kubernetes.io/component: mcp-server
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.zabbixMcpServer.extraInitContainers }}
+      initContainers:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+      - name: zabbix-mcp-server
+        resources:
+          {{- toYaml .Values.zabbixMcpServer.resources | nindent 10 }}
+        securityContext:
+          {{- toYaml .Values.zabbixMcpServer.securityContext | nindent 10 }}
+        {{- if .Values.zabbixMcpServer.image.tag }}
+        image: "{{ .Values.zabbixMcpServer.image.repository }}:{{ .Values.zabbixMcpServer.image.tag }}"
+        {{- else }}
+        image: "{{ .Values.zabbixMcpServer.image.repository }}:{{ .Values.zabbixImageTag }}"
+        {{- end }}
+        imagePullPolicy: {{ .Values.zabbixMcpServer.image.pullPolicy }}
+        env:
+          - name: ZBX_FRONTEND_URL
+            value: {{ $frontendURL | quote }}
+          - name: ZBX_ALLOWEDIP
+            value: {{ .Values.zabbixMcpServer.allowedIP | quote }}
+          - name: ZBX_LISTENPORT
+            value: {{ .Values.zabbixMcpServer.port | quote }}
+          {{- if not (kindIs "invalid" .Values.zabbixMcpServer.debugLevel) }}
+          - name: ZBX_DEBUGLEVEL
+            value: {{ .Values.zabbixMcpServer.debugLevel | quote }}
+          {{- end }}
+          {{- with .Values.zabbixMcpServer.timeout }}
+          - name: ZBX_TIMEOUT
+            value: {{ . | quote }}
+          {{- end }}
+          {{- with .Values.zabbixMcpServer.maxResponseSize }}
+          - name: ZBX_MAX_RESPONSE_SIZE
+            value: {{ . | quote }}
+          {{- end }}
+          {{- with .Values.zabbixMcpServer.toolPrefix }}
+          - name: ZBX_TOOL_PREFIX
+            value: {{ . | quote }}
+          {{- end }}
+          {{- if .Values.zabbixMcpServer.ignoreURLCertErrors }}
+          - name: ZBX_IGNOREURLCERTERRORS
+            value: "true"
+          {{- end }}
+          {{- range $i, $tool := .Values.zabbixMcpServer.toolAccess.allowTool }}
+          - name: ZBX_ALLOWTOOL_{{ $i }}
+            value: {{ $tool | quote }}
+          {{- end }}
+          {{- range $i, $tool := .Values.zabbixMcpServer.toolAccess.denyTool }}
+          - name: ZBX_DENYTOOL_{{ $i }}
+            value: {{ $tool | quote }}
+          {{- end }}
+          {{- range $i, $tool := .Values.zabbixMcpServer.toolAccess.allowToolRegexp }}
+          - name: ZBX_ALLOWTOOL_REGEXP_{{ $i }}
+            value: {{ $tool | quote }}
+          {{- end }}
+          {{- range $i, $tool := .Values.zabbixMcpServer.toolAccess.denyToolRegexp }}
+          - name: ZBX_DENYTOOL_REGEXP_{{ $i }}
+            value: {{ $tool | quote }}
+          {{- end }}
+          {{- if .Values.zabbixMcpServer.tls.enabled }}
+          - name: ZBX_TLSACCEPT
+            value: "cert"
+          - name: ZBX_TLSCERTFILE
+            value: {{ .Values.zabbixMcpServer.tls.certFile | quote }}
+          - name: ZBX_TLSKEYFILE
+            value: {{ .Values.zabbixMcpServer.tls.keyFile | quote }}
+          {{- end }}
+          {{- with .Values.zabbixMcpServer.extraEnv }}
+          {{- toYaml . | nindent 10 }}
+          {{- end }}
+        ports:
+          - name: mcp-server
+            containerPort: {{ .Values.zabbixMcpServer.port }}
+            protocol: TCP
+        {{- if or .Values.zabbixMcpServer.tls.enabled .Values.zabbixMcpServer.extraVolumeMounts }}
+        volumeMounts:
+          {{- if .Values.zabbixMcpServer.tls.enabled }}
+          - name: mcp-server-tls
+            mountPath: /var/lib/zabbix/enc
+            readOnly: true
+          {{- end }}
+          {{- with .Values.zabbixMcpServer.extraVolumeMounts }}
+          {{- toYaml . | nindent 10 }}
+          {{- end }}
+        {{- end }}
+        {{- with .Values.zabbixMcpServer.livenessProbe }}
+        livenessProbe:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- with .Values.zabbixMcpServer.readinessProbe }}
+        readinessProbe:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- with .Values.zabbixMcpServer.startupProbe }}
+        startupProbe:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+      {{- with .Values.zabbixMcpServer.extraContainers }}
+      {{- toYaml . | nindent 6 }}
+      {{- end }}
+      imagePullSecrets:
+      {{- range .Values.zabbixMcpServer.image.pullSecrets }}
+        - name: {{ . | quote }}
+      {{- end }}
+      {{- with .Values.global.imagePullSecrets }}
+      {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if or .Values.zabbixMcpServer.tls.enabled .Values.zabbixMcpServer.extraVolumes }}
+      volumes:
+        {{- if .Values.zabbixMcpServer.tls.enabled }}
+        - name: mcp-server-tls
+          secret:
+            secretName: {{ required "zabbixMcpServer.tls.secretName is required when zabbixMcpServer.tls.enabled=true" .Values.zabbixMcpServer.tls.secretName }}
+        {{- end }}
+        {{- with .Values.zabbixMcpServer.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- end }}
+{{- end }}
