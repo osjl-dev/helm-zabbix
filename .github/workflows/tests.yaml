@@ -99,6 +99,22 @@ jobs:
           kubectl --namespace zabbix get pods -o ${{ env.COLUMN_OPTIONS }}
           helm test --namespace zabbix zabbix
 
+      - name: Dump debug info on failure
+        if: failure()
+        run: |
+          kubectl --namespace zabbix get pods,jobs,svc,endpoints -o wide --show-labels || true
+          kubectl --namespace zabbix get events --sort-by=.lastTimestamp || true
+          for pod in $(kubectl --namespace zabbix get pods -o name); do
+            echo "===== describe ${pod}"
+            kubectl --namespace zabbix describe "${pod}" || true
+            for c in $(kubectl --namespace zabbix get "${pod}" -o jsonpath='{.spec.initContainers[*].name} {.spec.containers[*].name}'); do
+              echo "===== logs ${pod} -c ${c}"
+              kubectl --namespace zabbix logs "${pod}" -c "${c}" --tail=200 || true
+              echo "===== previous logs ${pod} -c ${c}"
+              kubectl --namespace zabbix logs "${pod}" -c "${c}" --previous --tail=200 || true
+            done
+          done
+
       - name: Run helm uninstall
         run: |
           helm uninstall --wait zabbix --namespace zabbix
@@ -175,6 +191,22 @@ jobs:
           kubectl --namespace zabbix get pods -o ${{ env.COLUMN_OPTIONS }}
           helm test --namespace zabbix zabbix
 
+      - name: Dump debug info on failure
+        if: failure()
+        run: |
+          kubectl --namespace zabbix get pods,jobs,svc,endpoints -o wide --show-labels || true
+          kubectl --namespace zabbix get events --sort-by=.lastTimestamp || true
+          for pod in $(kubectl --namespace zabbix get pods -o name); do
+            echo "===== describe ${pod}"
+            kubectl --namespace zabbix describe "${pod}" || true
+            for c in $(kubectl --namespace zabbix get "${pod}" -o jsonpath='{.spec.initContainers[*].name} {.spec.containers[*].name}'); do
+              echo "===== logs ${pod} -c ${c}"
+              kubectl --namespace zabbix logs "${pod}" -c "${c}" --tail=200 || true
+              echo "===== previous logs ${pod} -c ${c}"
+              kubectl --namespace zabbix logs "${pod}" -c "${c}" --previous --tail=200 || true
+            done
+          done
+
       - name: Run helm uninstall
         run: |
           helm uninstall --wait zabbix --namespace zabbix
@@ -246,6 +278,22 @@ jobs:
         run: |
           kubectl --namespace zabbix get pods -o ${{ env.COLUMN_OPTIONS }}
           helm test --namespace zabbix zabbix
+
+      - name: Dump debug info on failure
+        if: failure()
+        run: |
+          kubectl --namespace zabbix get pods,jobs,svc,endpoints -o wide --show-labels || true
+          kubectl --namespace zabbix get events --sort-by=.lastTimestamp || true
+          for pod in $(kubectl --namespace zabbix get pods -o name); do
+            echo "===== describe ${pod}"
+            kubectl --namespace zabbix describe "${pod}" || true
+            for c in $(kubectl --namespace zabbix get "${pod}" -o jsonpath='{.spec.initContainers[*].name} {.spec.containers[*].name}'); do
+              echo "===== logs ${pod} -c ${c}"
+              kubectl --namespace zabbix logs "${pod}" -c "${c}" --tail=200 || true
+              echo "===== previous logs ${pod} -c ${c}"
+              kubectl --namespace zabbix logs "${pod}" -c "${c}" --previous --tail=200 || true
+            done
+          done
 
       - name: Run helm uninstall
         run: |
