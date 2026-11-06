@@ -20,6 +20,7 @@ This Helm chart installs [Zabbix](https://www.zabbix.com) in a Kubernetes cluste
 - [Troubleshooting](#troubleshooting)
 - [Uninstallation](#uninstallation)
 - [Breaking changes of this helm chart](#breaking-changes-of-this-helm-chart)
+  - [Version 8.1.0](#version-810)
   - [Version 8.0.0](#version-800)
   - [Version 7.0.0](#version-700)
   - [Version 6.1.0](#version-610)
@@ -184,6 +185,12 @@ helm uninstall zabbix -n monitoring
 ```
 
 # Breaking changes of this helm chart
+
+## Version 8.1.0
+
+- Added support for [Zabbix MCP Server](#zabbix-mcp-server) (new ``zabbixMcpServer`` section in ``values.yaml``, disabled by default), with its own Service and optional Ingress.
+- Added ``zabbixServer.zabbixServerHA.dbCreateUpgradeJob.image.tagSuffixOverrides`` to choose the tag suffix of the HA database job image per Zabbix major version. By default Zabbix 8.0 uses ``8.0-trunk-20261009150714``, because the image ``8.0-20261009150714`` isn't published yet.
+- No breaking changes, existing ``values.yaml`` files keep working.
 
 ## Version 8.0.0
 
@@ -382,9 +389,9 @@ monitoring and view monitoring statistics
 ## Zabbix MCP Server
 
 > [!NOTE]
-> Zabbix MCP Server is available since Zabbix 8.0 and is disabled by default. To enable it, set
-``zabbixMcpServer.enabled=true`` and use a Zabbix 8.0+ image, either via ``zabbixImageTag`` or
-``zabbixMcpServer.image.tag`` (e.g. ``ubuntu-8.0-latest``).
+> Zabbix MCP Server is available since Zabbix 8.0 (the default version of this chart) and is disabled by default. To enable it, set
+``zabbixMcpServer.enabled=true``. If you override ``zabbixImageTag`` with an older version, set
+``zabbixMcpServer.image.tag`` to a Zabbix 8.0+ image (e.g. ``ubuntu-8.0-latest``).
 
 **Zabbix MCP Server** lets AI agents work with Zabbix through the
 [Model Context Protocol](https://modelcontextprotocol.io) (Streamable HTTP transport). It is stateless

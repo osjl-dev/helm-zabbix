@@ -1,6 +1,6 @@
 # Helm chart for Zabbix
 
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0) ![Version: 8.0.0](https://img.shields.io/badge/Version-8.0.0-informational?style=flat-square)  [![Downloads](https://img.shields.io/github/downloads/zabbix-community/helm-zabbix/total?label=Downloads
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0) ![Version: 8.1.0](https://img.shields.io/badge/Version-8.1.0-informational?style=flat-square)  [![Downloads](https://img.shields.io/github/downloads/zabbix-community/helm-zabbix/total?label=Downloads
 )](https://somsubhra.github.io/github-release-stats/?username=zabbix-community&repository=helm-zabbix&page=1&per_page=500#) [![Releases ChangeLog](https://img.shields.io/badge/Changelog-8A2BE2
 )](https://github.com/zabbix-community/helm-zabbix/releases)
 
@@ -19,6 +19,7 @@ This Helm chart installs [Zabbix](https://www.zabbix.com) in a Kubernetes cluste
 - [Troubleshooting](#troubleshooting)
 - [Uninstallation](#uninstallation)
 - [Breaking changes of this helm chart](#breaking-changes-of-this-helm-chart)
+  - [Version 8.1.0](#version-810)
   - [Version 8.0.0](#version-800)
   - [Version 7.0.0](#version-700)
   - [Version 6.1.0](#version-610)
@@ -33,6 +34,7 @@ This Helm chart installs [Zabbix](https://www.zabbix.com) in a Kubernetes cluste
   - [Zabbix Agent](#zabbix-agent)
   - [Zabbix Web (frontend)](#zabbix-web-frontend)
   - [Zabbix Web Service](#zabbix-web-service)
+  - [Zabbix MCP Server](#zabbix-mcp-server)
   - [Zabbix Proxy](#zabbix-proxy)
   - [PostgreSQL](#postgresql)
 - [Thanks](#thanks)
@@ -85,7 +87,7 @@ helm search repo zabbix-community/zabbix -l
 Set the helm chart version you want to use. Example:
 
 ```bash
-export ZABBIX_CHART_VERSION='8.0.0'
+export ZABBIX_CHART_VERSION='8.1.0'
 ```
 
 Export default values of ``zabbix`` chart to ``$HOME/zabbix_values.yaml`` file:
@@ -182,6 +184,12 @@ helm uninstall zabbix -n monitoring
 ```
 
 # Breaking changes of this helm chart
+
+## Version 8.1.0
+
+- Added support for [Zabbix MCP Server](#zabbix-mcp-server) (new ``zabbixMcpServer`` section in ``values.yaml``, disabled by default), with its own Service and optional Ingress.
+- Added ``zabbixServer.zabbixServerHA.dbCreateUpgradeJob.image.tagSuffixOverrides`` to choose the tag suffix of the HA database job image per Zabbix major version. By default Zabbix 8.0 uses ``8.0-trunk-20261009150714``, because the image ``8.0-20261009150714`` isn't published yet.
+- No breaking changes, existing ``values.yaml`` files keep working.
 
 ## Version 8.0.0
 
@@ -374,6 +382,48 @@ monitoring and view monitoring statistics
 
 **Zabbix Web Service** is a process that is used for communication with external web services
 [Official documentation](https://www.zabbix.com/documentation/current/en/manual/concepts/web_service).
+
+## Zabbix MCP Server
+
+> [!NOTE]
+> Zabbix MCP Server is available since Zabbix 8.0 (the default version of this chart) and is disabled by default. To enable it, set
+``zabbixMcpServer.enabled=true``. If you override ``zabbixImageTag`` with an older version, set
+``zabbixMcpServer.image.tag`` to a Zabbix 8.0+ image (e.g. ``ubuntu-8.0-latest``).
+
+**Zabbix MCP Server** lets AI agents work with Zabbix through the
+[Model Context Protocol](https://modelcontextprotocol.io) (Streamable HTTP transport). It is stateless
+and sits between MCP clients and the Zabbix API: every request must carry a Zabbix API token in the
+``Authorization: Bearer <token>`` header, and Zabbix enforces the token owner's permissions
+[Official documentation](https://www.zabbix.com/documentation/8.0/en/manual/concepts/mcp_server).
+
+By default the chart points the MCP server at the in-cluster Zabbix Web service of the same release
+(``http://<release>-zabbix-web:<port>/api_jsonrpc.php``). Use ``zabbixMcpServer.frontendURL`` to
+point it elsewhere (required if ``zabbixWeb.enabled=false``).
+
+The MCP endpoint is ``/mcp`` on port ``8443``. It can be exposed via ``zabbixMcpServer.service`` and/or
+``zabbixMcpServer.ingress``. Keep in mind:
+
+- ``zabbixMcpServer.allowedIP`` is checked against the source IP seen by the pod. Behind an Ingress
+  controller or a ``LoadBalancer`` service with ``externalTrafficPolicy: Cluster`` that is the
+  controller/node IP, not the real client IP.
+- TLS can either be terminated by an Ingress/reverse proxy (default, plain HTTP inside the cluster), or
+  served by the MCP server itself with ``zabbixMcpServer.tls.enabled=true`` and an existing Secret
+  (``zabbixMcpServer.tls.secretName``) holding the certificate and key.
+- Tool access can be restricted with ``zabbixMcpServer.toolAccess.*``. If any rule is set, it replaces
+  the image default policy, which denies ``item_get``, ``lld_get``, ``interface_get``, ``macro_get`` and
+  ``history_get``. Write tools (``problem_*``, ``maintenance_*``) are enabled by default.
+
+Quick check from inside the cluster:
+
+```bash
+kubectl port-forward service/<release>-zabbix-mcp-server 8443:8443 -n <namespace>
+
+curl -s http://127.0.0.1:8443/mcp \
+  -H "Authorization: Bearer <zabbix_api_token>" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
 
 ## Zabbix Proxy
 
@@ -618,6 +668,59 @@ The following tables lists the configurable parameters of the chart and their de
 | zabbixJavaGateway.service.type | string | `"ClusterIP"` | Type of service to expose the application. Valid options are ExternalName, ClusterIP, NodePort, and LoadBalancer. More details: https://kubernetes.io/docs/concepts/services-networking/service/ |
 | zabbixJavaGateway.startupProbe | object | `{"failureThreshold":5,"initialDelaySeconds":15,"periodSeconds":5,"successThreshold":1,"tcpSocket":{"port":"zabbix-java-gw"},"timeoutSeconds":3}` | The kubelet uses startup probes to know when a container application has started.  Reference: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/ |
 | zabbixJavaGateway.startupProbe.tcpSocket.port | string | `"zabbix-java-gw"` | Port number/alias name of the container |
+| zabbixMcpServer.allowedIP | string | `"0.0.0.0/0,::/0"` | Comma-separated list of IP addresses/CIDRs of MCP clients allowed to connect (ZBX_ALLOWEDIP). Clients reaching the server through an Ingress/LoadBalancer are seen with the proxy/node IP. Restrict this in production. |
+| zabbixMcpServer.debugLevel | string | `nil` | Debug level (ZBX_DEBUGLEVEL, 0-5). Image default is 3 if not set |
+| zabbixMcpServer.enabled | bool | `false` | Enables use of **Zabbix MCP Server**. Requires Zabbix >= 8.0 (the default ``zabbixImageTag``) |
+| zabbixMcpServer.extraContainers | list | `[]` | Additional containers to start within the Zabbix MCP Server pod |
+| zabbixMcpServer.extraDeploymentAnnotations | object | `{}` | Annotations to add to the deployment |
+| zabbixMcpServer.extraDeploymentLabels | object | `{}` | Labels to add to the deployment |
+| zabbixMcpServer.extraEnv | list | `[]` | Extra environment variables. A list of additional environment variables. See: https://hub.docker.com/r/zabbix/zabbix-mcp-server |
+| zabbixMcpServer.extraInitContainers | list | `[]` | Additional init containers to start within the Zabbix MCP Server pod |
+| zabbixMcpServer.extraPodAnnotations | object | `{}` | Annotations to add to the pods |
+| zabbixMcpServer.extraPodLabels | object | `{}` | Labels to add to the pods |
+| zabbixMcpServer.extraPodSpecs | object | `{}` | Additional specifications to the Zabbix MCP Server pod |
+| zabbixMcpServer.extraVolumeMounts | list | `[]` | Additional volumeMounts to the Zabbix MCP Server container |
+| zabbixMcpServer.extraVolumes | list | `[]` | Additional volumes to make available to the Zabbix MCP Server pod |
+| zabbixMcpServer.frontendURL | string | `""` | Zabbix API endpoint (ZBX_FRONTEND_URL), must end with ``api_jsonrpc.php``. If empty, the in-cluster Zabbix Web service of this release is used, e.g. ``http://<release>-zabbix-web:80/api_jsonrpc.php`` |
+| zabbixMcpServer.ignoreURLCertErrors | bool | `false` | Skip TLS certificate validation for Zabbix API requests (ZBX_IGNOREURLCERTERRORS). Development only! |
+| zabbixMcpServer.image.pullPolicy | string | `"IfNotPresent"` | Pull policy of Docker image |
+| zabbixMcpServer.image.pullSecrets | list | `[]` | List of dockerconfig secrets names to use when pulling images |
+| zabbixMcpServer.image.repository | string | `"zabbix/zabbix-mcp-server"` | Zabbix MCP Server Docker image name |
+| zabbixMcpServer.image.tag | string | `nil` | Zabbix MCP Server Docker image tag, if you want to override zabbixImageTag. Must be >= 8.0, e.g. ``ubuntu-8.0-latest`` |
+| zabbixMcpServer.ingress.annotations | object | `{}` | Ingress annotations. If ``tls.enabled=true``, the backend protocol must be HTTPS (e.g. ``nginx.ingress.kubernetes.io/backend-protocol: HTTPS``) |
+| zabbixMcpServer.ingress.enabled | bool | `false` | Enables a dedicated Ingress for the Zabbix MCP Server (endpoint path is ``/mcp``) |
+| zabbixMcpServer.ingress.hosts | list | `[{"host":"zabbix-mcp.example.local","paths":[{"path":"/mcp","pathType":"Prefix"}]}]` | Ingress hosts |
+| zabbixMcpServer.ingress.ingressClassName | string | `""` | Ingress class name |
+| zabbixMcpServer.ingress.tls | list | `[]` | Ingress TLS configuration |
+| zabbixMcpServer.livenessProbe | object | `{"initialDelaySeconds":10,"periodSeconds":20,"tcpSocket":{"port":"mcp-server"}}` | The kubelet uses liveness probes to know when to restart a container. Reference: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/ |
+| zabbixMcpServer.maxResponseSize | string | `nil` | Maximum size of a tool response (ZBX_MAX_RESPONSE_SIZE, 16K-256K). Image default is 64K if not set |
+| zabbixMcpServer.nodeSelector | object | `{}` | nodeSelector configurations. Reference: https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/ |
+| zabbixMcpServer.podAntiAffinity | bool | `true` | Set permissive podAntiAffinity to spread replicas over cluster nodes if replicaCount>1 |
+| zabbixMcpServer.port | int | `8443` | Port the Zabbix MCP Server listens on inside the container (ZBX_LISTENPORT, range 1024-32767) |
+| zabbixMcpServer.readinessProbe | object | `{"initialDelaySeconds":5,"periodSeconds":10,"tcpSocket":{"port":"mcp-server"}}` | The kubelet uses readiness probes to know when a container is ready to start accepting traffic. Reference: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/ |
+| zabbixMcpServer.replicaCount | int | `1` | Number of replicas of ``zabbixMcpServer`` module. The MCP server is stateless, so it can be scaled horizontally |
+| zabbixMcpServer.resources | object | `{}` | Requests and limits of pod resources. See: [https://kubernetes.io/docs/concepts/configuration/manage-resources-containers](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers) |
+| zabbixMcpServer.securityContext | object | `{}` | Security Context configurations. Reference: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/ |
+| zabbixMcpServer.service.annotations | object | `{}` | Annotations for the Zabbix MCP Server service |
+| zabbixMcpServer.service.clusterIP | string | `nil` | clusterIP is the IP address of the service and is usually assigned randomly. If an address is specified manually, is in-range (as per system configuration), and is not in use, it will be allocated to the service. |
+| zabbixMcpServer.service.externalTrafficPolicy | string | `nil` | Denotes if this Service desires to route external traffic to node-local or cluster-wide endpoints. Use ``Local`` to preserve the client source IP, which matters for ``allowedIP``. |
+| zabbixMcpServer.service.loadBalancerClass | string | `""` | loadBalancerClass is the class of the load balancer implementation this Service belongs to. |
+| zabbixMcpServer.service.loadBalancerIP | string | `""` | Only applies to Service Type: LoadBalancer. This feature depends on whether the underlying cloud-provider supports specifying the loadBalancerIP when a load balancer is created. |
+| zabbixMcpServer.service.loadBalancerSourceRanges | list | `[]` | If specified and supported by the platform, traffic through the cloud-provider load-balancer will be restricted to the specified client IPs. |
+| zabbixMcpServer.service.nodePort | string | `nil` | NodePort port to allocate on each node (only if service.type = NodePort or Loadbalancer) |
+| zabbixMcpServer.service.port | int | `8443` | Port of service in Kubernetes cluster |
+| zabbixMcpServer.service.type | string | `"ClusterIP"` | Type of service to expose the application. Valid options are ExternalName, ClusterIP, NodePort, and LoadBalancer. More details: https://kubernetes.io/docs/concepts/services-networking/service/ |
+| zabbixMcpServer.startupProbe | object | `{}` | The kubelet uses startup probes to know when a container application has started.  Reference: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/ |
+| zabbixMcpServer.timeout | string | `nil` | Timeout in seconds for Zabbix API requests (ZBX_TIMEOUT, 3-30). Image default is 10 if not set |
+| zabbixMcpServer.tls.certFile | string | `"tls.crt"` | File name of the certificate inside the Secret (ZBX_TLSCERTFILE) |
+| zabbixMcpServer.tls.enabled | bool | `false` | Serve HTTPS directly from the MCP server (ZBX_TLSACCEPT=cert). Leave disabled when TLS is terminated by an Ingress/reverse proxy |
+| zabbixMcpServer.tls.keyFile | string | `"tls.key"` | File name of the private key inside the Secret (ZBX_TLSKEYFILE) |
+| zabbixMcpServer.tls.secretName | string | `""` | Name of an existing Secret with the certificate and key, mounted read-only at ``/var/lib/zabbix/enc``. A ``kubernetes.io/tls`` Secret works as is |
+| zabbixMcpServer.toolAccess.allowTool | list | `[]` | List of tool names to allow (ZBX_ALLOWTOOL_<N>), e.g. ``["history_get"]`` |
+| zabbixMcpServer.toolAccess.allowToolRegexp | list | `[]` | List of regular expressions of tool names to allow (ZBX_ALLOWTOOL_REGEXP_<N>) |
+| zabbixMcpServer.toolAccess.denyTool | list | `[]` | List of tool names to deny (ZBX_DENYTOOL_<N>), e.g. ``["maintenance_delete"]`` |
+| zabbixMcpServer.toolAccess.denyToolRegexp | list | `[]` | List of regular expressions of tool names to deny (ZBX_DENYTOOL_REGEXP_<N>), e.g. ``["^maintenance_"]`` |
+| zabbixMcpServer.toolPrefix | string | `nil` | Prefix prepended to exposed tool names (ZBX_TOOL_PREFIX) |
 | zabbixProxy.ZBX_DEBUGLEVEL | int | `3` |  |
 | zabbixProxy.ZBX_HOSTNAME | string | `"zabbix-proxy"` | Zabbix Proxy hostname. Case sensitive hostname. If not defined the pod name will be used |
 | zabbixProxy.ZBX_JAVAGATEWAY_ENABLE | bool | `false` | The variable enable communication with the Zabbix Java Gateway of this helm chart (zabbixJavaGateway.enabled) to collect Java related checks. By default, value is false. |
@@ -707,19 +810,20 @@ The following tables lists the configurable parameters of the chart and their de
 | zabbixServer.service.sessionAffinity | string | `"None"` | Supports "ClientIP" and "None". Used to maintain session affinity. Enable client IP based session affinity. Must be ClientIP or None. Defaults to None. More info: https://kubernetes.io/docs/concepts/services-networking/service/#virtual-ips-and-service-proxies |
 | zabbixServer.service.type | string | `"ClusterIP"` | Type of service to expose the application. Valid options are ExternalName, ClusterIP, NodePort, and LoadBalancer. More details: https://kubernetes.io/docs/concepts/services-networking/service/ |
 | zabbixServer.startupProbe | object | `{}` | The kubelet uses startup probes to know when a container application has started.  Reference: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/ |
-| zabbixServer.zabbixServerHA | object | `{"dbCreateUpgradeJob":{"extraContainers":[],"extraInitContainers":[],"extraPodSpecs":{},"extraVolumeMounts":[],"extraVolumes":[],"image":{"pullPolicy":"IfNotPresent","pullSecrets":[],"repository":"ghcr.io/zabbix-community/zabbix-server-create-upgrade-db","tag":"","tagSuffix":"20261009150714"},"resources":{},"securityContext":{}},"enabled":false,"haLabelsSidecar":{"extraVolumeMounts":[],"image":{"pullPolicy":"IfNotPresent","pullSecrets":[],"repository":"ghcr.io/zabbix-community/zabbix-server-ha-label-manager","tag":"20241230230305"},"labelName":"zabbix.com/server-ha-role","resources":{},"securityContext":{}},"role":{"annotations":{}},"roleBinding":{"annotations":{}},"serviceAccount":{"annotations":{}}}` | Section responsible for native Zabbix Server High Availability support of this Helm Chart |
-| zabbixServer.zabbixServerHA.dbCreateUpgradeJob | object | `{"extraContainers":[],"extraInitContainers":[],"extraPodSpecs":{},"extraVolumeMounts":[],"extraVolumes":[],"image":{"pullPolicy":"IfNotPresent","pullSecrets":[],"repository":"ghcr.io/zabbix-community/zabbix-server-create-upgrade-db","tag":"","tagSuffix":"20261009150714"},"resources":{},"securityContext":{}}` | Settings for the database initialization / upgrade job needed for HA enabled setups |
+| zabbixServer.zabbixServerHA | object | `{"dbCreateUpgradeJob":{"extraContainers":[],"extraInitContainers":[],"extraPodSpecs":{},"extraVolumeMounts":[],"extraVolumes":[],"image":{"pullPolicy":"IfNotPresent","pullSecrets":[],"repository":"ghcr.io/zabbix-community/zabbix-server-create-upgrade-db","tag":"","tagSuffix":"20261009150714","tagSuffixOverrides":{"8.0":"trunk-20261009150714"}},"resources":{},"securityContext":{}},"enabled":false,"haLabelsSidecar":{"extraVolumeMounts":[],"image":{"pullPolicy":"IfNotPresent","pullSecrets":[],"repository":"ghcr.io/zabbix-community/zabbix-server-ha-label-manager","tag":"20241230230305"},"labelName":"zabbix.com/server-ha-role","resources":{},"securityContext":{}},"role":{"annotations":{}},"roleBinding":{"annotations":{}},"serviceAccount":{"annotations":{}}}` | Section responsible for native Zabbix Server High Availability support of this Helm Chart |
+| zabbixServer.zabbixServerHA.dbCreateUpgradeJob | object | `{"extraContainers":[],"extraInitContainers":[],"extraPodSpecs":{},"extraVolumeMounts":[],"extraVolumes":[],"image":{"pullPolicy":"IfNotPresent","pullSecrets":[],"repository":"ghcr.io/zabbix-community/zabbix-server-create-upgrade-db","tag":"","tagSuffix":"20261009150714","tagSuffixOverrides":{"8.0":"trunk-20261009150714"}},"resources":{},"securityContext":{}}` | Settings for the database initialization / upgrade job needed for HA enabled setups |
 | zabbixServer.zabbixServerHA.dbCreateUpgradeJob.extraContainers | list | `[]` | Additional containers to start within the dbCreateUpgradeJob pod |
 | zabbixServer.zabbixServerHA.dbCreateUpgradeJob.extraInitContainers | list | `[]` | Additional init containers to start within the dbCreateUpgradeJob pod |
 | zabbixServer.zabbixServerHA.dbCreateUpgradeJob.extraPodSpecs | object | `{}` | Additional specifications to the dbCreateUpgradeJob pod |
 | zabbixServer.zabbixServerHA.dbCreateUpgradeJob.extraVolumeMounts | list | `[]` | Additional volumeMounts to the dbCreateUpgradeJob pod |
 | zabbixServer.zabbixServerHA.dbCreateUpgradeJob.extraVolumes | list | `[]` | Additional volumes to make available to the dbCreateUpgradeJob pod |
-| zabbixServer.zabbixServerHA.dbCreateUpgradeJob.image | object | `{"pullPolicy":"IfNotPresent","pullSecrets":[],"repository":"ghcr.io/zabbix-community/zabbix-server-create-upgrade-db","tag":"","tagSuffix":"20261009150714"}` | Image settings for the database initialization / upgrade job |
+| zabbixServer.zabbixServerHA.dbCreateUpgradeJob.image | object | `{"pullPolicy":"IfNotPresent","pullSecrets":[],"repository":"ghcr.io/zabbix-community/zabbix-server-create-upgrade-db","tag":"","tagSuffix":"20261009150714","tagSuffixOverrides":{"8.0":"trunk-20261009150714"}}` | Image settings for the database initialization / upgrade job |
 | zabbixServer.zabbixServerHA.dbCreateUpgradeJob.image.pullPolicy | string | `"IfNotPresent"` | Pull policy for the db initialization / upgrade job |
 | zabbixServer.zabbixServerHA.dbCreateUpgradeJob.image.pullSecrets | list | `[]` | Pull secrets for the db initialization / upgrade job |
 | zabbixServer.zabbixServerHA.dbCreateUpgradeJob.image.repository | string | `"ghcr.io/zabbix-community/zabbix-server-create-upgrade-db"` | Image repository for the database initialization / upgrade job |
 | zabbixServer.zabbixServerHA.dbCreateUpgradeJob.image.tag | string | `""` | Tag of the image to use for the dbCreateUpgradeJob. Don't override this if you don't have a specific reason. If empty, it is going to be chosen based on the major release of the zabbix_server image and tagSuffix. |
 | zabbixServer.zabbixServerHA.dbCreateUpgradeJob.image.tagSuffix | string | `"20261009150714"` | The tag suffix used for the dbCreateUpgradeJob's image when not explicitly specifying a tag for the image. The tag name will be concatenated with major release of zabbix_server image if specified |
+| zabbixServer.zabbixServerHA.dbCreateUpgradeJob.image.tagSuffixOverrides | object | `{"8.0":"trunk-20261009150714"}` | Per Zabbix major version (``major.minor``) override of ``tagSuffix``, for versions not (yet) built with the common suffix. Zabbix 8.0 currently only has a trunk build of this image. |
 | zabbixServer.zabbixServerHA.dbCreateUpgradeJob.resources | object | `{}` | Resource requests and limits for the dbCreateUpgradeJob pod |
 | zabbixServer.zabbixServerHA.dbCreateUpgradeJob.securityContext | object | `{}` | Security Context configurations. Reference: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/ |
 | zabbixServer.zabbixServerHA.enabled | bool | `false` | Enables support for Zabbix Server High Availability. If disabled, replicaCount will always be 1. Can not be combined with ``postgresql.enabled=true`` |
