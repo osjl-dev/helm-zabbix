@@ -189,8 +189,16 @@ helm uninstall zabbix -n monitoring
 ## Version 8.1.0
 
 - Added support for [Zabbix MCP Server](#zabbix-mcp-server) (new ``zabbixMcpServer`` section in ``values.yaml``, disabled by default), with its own Service and optional Ingress.
-- Added ``zabbixServer.zabbixServerHA.dbCreateUpgradeJob.image.tagSuffixOverrides`` to choose the tag suffix of the HA database job image per Zabbix major version. By default Zabbix 8.0 uses ``8.0-trunk-20261009150714``, because the image ``8.0-20261009150714`` isn't published yet.
 - No breaking changes, existing ``values.yaml`` files keep working.
+
+> [!WARNING]
+> Known issue, inherited from version 8.0.0: [Native Zabbix Server High Availability](#native-zabbix-server-high-availability)
+(``zabbixServer.zabbixServerHA.enabled=true``) doesn't work yet with Zabbix 8.0. The database job image
+``ghcr.io/zabbix-community/zabbix-server-create-upgrade-db:8.0-20261009150714`` isn't published. The only
+available 8.0 build, ``8.0-trunk-20261009150714``, is based on Zabbix 8.0.0rc2 and creates an older database
+schema (``7050195``), which Zabbix Server 8.0.0 (``8000000``) refuses to upgrade in HA mode. Until a job
+image built on Zabbix 8.0.0 is published, keep HA setups on Zabbix 7.x by setting ``zabbixImageTag``
+(for example ``ubuntu-7.0-latest``).
 
 ## Version 8.0.0
 

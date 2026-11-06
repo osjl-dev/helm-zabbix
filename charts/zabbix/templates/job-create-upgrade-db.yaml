@@ -56,15 +56,13 @@ spec:
           {{- $zabbixTag := .Values.zabbixServer.image.tag -}}
           {{- $match := regexFind $pattern $zabbixTag -}}
           {{- if $match }}
-            {{- $suffix := index (.Values.zabbixServer.zabbixServerHA.dbCreateUpgradeJob.image.tagSuffixOverrides | default dict) $match | default .Values.zabbixServer.zabbixServerHA.dbCreateUpgradeJob.image.tagSuffix -}}
-            {{- $tag = printf "%s-%s" $match $suffix -}}
+            {{- $tag = printf "%s-%s" $match .Values.zabbixServer.zabbixServerHA.dbCreateUpgradeJob.image.tagSuffix -}}
           {{- end }}
         {{- else }}
           {{- $globalTag := .Values.zabbixImageTag -}}
           {{- $match := regexFind $pattern $globalTag -}}
           {{- if $match }}
-            {{- $suffix := index (.Values.zabbixServer.zabbixServerHA.dbCreateUpgradeJob.image.tagSuffixOverrides | default dict) $match | default .Values.zabbixServer.zabbixServerHA.dbCreateUpgradeJob.image.tagSuffix -}}
-            {{- $tag = printf "%s-%s" $match $suffix -}}
+            {{- $tag = printf "%s-%s" $match .Values.zabbixServer.zabbixServerHA.dbCreateUpgradeJob.image.tagSuffix -}}
           {{- end }}
         {{- end }}
         {{- if eq $tag "" }}

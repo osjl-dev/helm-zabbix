@@ -102,10 +102,6 @@ zabbixServer:
         tag: ""
         # -- The tag suffix used for the dbCreateUpgradeJob's image when not explicitly specifying a tag for the image. The tag name will be concatenated with major release of zabbix_server image if specified
         tagSuffix: "20261009150714"
-        # -- Per Zabbix major version (``major.minor``) override of ``tagSuffix``, for versions not (yet) built with the common suffix.
-        # Zabbix 8.0 currently only has a trunk build of this image.
-        tagSuffixOverrides:
-          "8.0": "trunk-20261009150714"
         # -- Pull policy for the db initialization / upgrade job
         pullPolicy: IfNotPresent
         # -- Pull secrets for the db initialization / upgrade job
